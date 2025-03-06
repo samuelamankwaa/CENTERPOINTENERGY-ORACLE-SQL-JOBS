@@ -1,0 +1,6 @@
+select ced.name, to_char(ee.occurred_at, 'DD Mon YY HH24:MI:ss'), ee.posted_by 
+from elog_event ee, cnd_event_def ced where for_user =
+(select user_id from lab_user where logon_id = '0023')
+and ee.event_type = ced.EVENT_DEF_ID
+And ee.occurred_at > sysdate-30
+order by ee.occurred_at;

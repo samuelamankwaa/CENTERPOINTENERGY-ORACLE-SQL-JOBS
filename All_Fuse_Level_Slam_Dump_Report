@@ -1,0 +1,190 @@
+Select distinct
+ef.eventname,
+effsd.Fuse_SD,
+effsd.trouble_lvl,
+Max_Cust_Aff_Date,
+--effsd.First_Arrival,
+effsd.action_taken,
+effsd.phase_count,
+effsd.CMI
+From obvwh.oms_event_fact@fprp ef
+-------------------------------------------------------------------------------Cause Code Table Join
+LEFT JOIN obvwh.oms_cause_dim@fprp cd ON ef.causekey = cd.causekey
+-------------------------------------------------------------------------------------------------------------------------Fuse Slam Dunk Check
+left join (Select distinct 
+        effsd.eventname,
+        cocr.eventkey,
+        effsd.trouble_lvl,
+        Cra1.First_Arrival,
+        MCAA.OUTAGE_DATE as Max_Cust_Aff_Date,
+        qaat1.action_taken,
+        create_aud.operator_id,
+        cocr.CALLERTYPE,
+        qaef1.phase_count,
+        effsd.CMI,
+        case
+            when effsd.trouble_lvl in 'F' -- Fuse events 
+            AND Cra1.First_Arrival > MCAA.OUTAGE_DATE  -- in which the first Crew's arrival date is greater than (occurs after) the max customer affected time stamp
+            AND (substr(qaat1.action_taken,1,1) = '4' -- and it's only action taken starts with a 4 (fuse level)
+                   OR qaat1.action_taken LIKE '%, 4%' ) -- Or has at least one action that starts with a 4
+            And create_aud.operator_id in ('ABB ENGINE', 'SCADA') -- and wasn't created by a controller opening a device in PSE 9
+           and cocr.CALLERTYPE is null  -- and doesn't have a call associated in which a technician called in 
+            AND (qaef1.phase_count in 'Single Phase' -- and is associated with a single phase fuse
+                    or qaef1.phase_count in 'Multi Phase' -- or a muilti phase fuse 
+                        and effsd.CMI < 6000) -- with a low CMI (<6000 ... 50 customers - 2 hours)
+            then 'Fuse_SD'
+            Else null
+            End as Fuse_SD
+From obvwh.oms_event_fact@fprp effsd 
+            ------------------------------------------------------------ MCAA.OUTAGE_DATE aka Max_Cust_Aff_Date
+Left join -- 3. Select the largest number of customers affected and identify the time stamp
+	(Select distinct 
+        MCA.eventname,
+        MCA1.OUTAGE_DATE,
+        MCA1.CUST_AFF,
+        MCA1.CUST_AFF_Order
+        FROM obvwh.oms_gap_audit_log@fprp MCA
+            left join -- 2. Rank the number of customers affect from largest to smallest
+			(Select distinct
+                 MCA2.eventname,
+                 MCA3.OUTAGE_DATE,
+                 MCA3.CUST_AFF,
+                 Dense_rank () over (partition by MCA2.EVENTNAME order by MCA3.CUST_AFF desc) as CUST_AFF_Order          
+               FROM obvwh.oms_gap_audit_log@fprp MCA2
+                 left join -- 1. Identify when the number of customers affected for an event changes within the audit log
+				 (SELECT distinct
+                     MCA3.EVENTNAME, 
+                     MCA3.OUTAGE_DATE,
+                     substr(new_value,instr(new_value,'Affected')+9,15) AS CUST_AFF
+                    FROM obvwh.oms_gap_audit_log@fprp MCA3
+                    where 
+                    NEW_VALUE like '%Customers_Affected%')MCA3
+                    on MCA2.eventname = MCA3.eventname) MCA1
+                    on MCA.eventname = MCA1.eventname
+                where
+                MCA1.CUST_AFF_Order in '1')MCAA
+                on effsd.eventname = MCAA.eventname
+            ------------------------------------------------------------ Cra1.First_Arrival               
+     left join -- 2.Identify when the first crew arrived  
+	 ( Select distinct
+        Cra1.EVENTNAME,
+        CRAO1.OUTAGE_DATE as First_Arrival,
+        (CRAO1.OUTAGE_DATE  
+        || ' | '
+        || 'FIRST CREW ' 
+        || substr(Cra1.new_value,instr(Cra1.new_value,'ARRIVED'),7)
+        ) AS Arrived_1
+      From obvwh.oms_gap_audit_log@fprp Cra1
+      left join -- 1. Identify each time a crew arrived within the audit log and order them from first to last
+	  (SELECT distinct
+        CRAO1.EVENTNAME,
+        CRAO1.OUTAGE_DATE,
+        dense_rank () over (partition by CRAO1.EVENTNAME order by CRAO1.MESSAGE_ID) AS Arrival_Order
+        FROM
+            obvwh.oms_gap_audit_log@fprp CRAO1
+            where 
+            1=1
+            and CRAO1.NEW_VALUE like '%ARRIVED%'
+            ) CRAO1
+            on Cra1.eventname = Crao1.eventname
+        where
+        1=1
+        and Cra1.NEW_VALUE like '%ARRIVED%'
+        and CRAO1.Arrival_Order in '1'
+            ) Cra1
+        on effsd.eventname = Cra1.eventname     
+            ------------------------------------------------------------ qaef1.phase_count
+        LEFT JOIN -- Differentiate phase 
+		(SELECT
+            eventname,
+            phase,
+            hazard_level_code,
+            CASE
+                WHEN phase = 'C'   THEN 'Single Phase'
+                WHEN phase = '  C' THEN 'Single Phase'
+                WHEN phase = 'B'   THEN 'Single Phase'
+                WHEN phase = ' B ' THEN 'Single Phase'
+                WHEN phase = 'A'   THEN 'Single Phase'
+                WHEN phase = 'A  ' THEN 'Single Phase'
+                WHEN phase IS NULL THEN NULL
+                ELSE 'Multi Phase'
+            END AS phase_count
+        FROM
+            obvwh.oms_gap_new_cols@fprp
+	) qaef1 on effsd.eventname = qaef1.eventname
+            ----------------------------------------------------------- qaat1.action_taken
+LEFT JOIN -- Identify action taken
+	(SELECT
+            eventname,
+            LISTAGG(action_taken_name,' , ') WITHIN GROUP(
+                ORDER BY
+                    action_taken_name
+            ) AS action_taken
+        FROM
+            obvwh.oms_all_actions_taken_oms@fprp
+        GROUP BY
+            eventname
+    ) qaat1 ON qaef1.eventname = qaat1.eventname
+            ----------------------------------------------------------- cocr.CALLERTYPE
+left join --Identify if a crew called in
+	(Select distinct
+            cocr.eventkey,
+            cocr.CALLID,
+            cocr.RECDATETIME,
+            cocr.CALLDESC,
+            cocr.CALLERTYPE
+             from OBVWH.OMS_CALL_FACT@FPRP cocr
+             Where 
+--             eventkey in '17374584')
+             cocr.CALLERTYPE in 'CREW' ) 
+            cocr on effsd.eventkey = cocr.eventkey
+            ----------------------------------------------------------- create_aud.operator_id
+    LEFT JOIN -- Identify how the event was created
+	(SELECT distinct
+            eventname,
+            operator_id,
+            substr(new_value,instr(new_value,'Cr'),15) event_create
+        FROM
+            obvwh.oms_gap_audit_log@fprp
+        WHERE
+            new_value LIKE '%OUTAGE_STATUS_CHANGE; Status:CREATED%'
+    ) create_aud ON effsd.eventname = create_aud.eventname
+   ) effsd on ef.eventname = effsd.eventname
+--------------------------------------------------------------------------------------------------------------------------------------------------- incident complete
+     Left join (
+       SELECT
+            eventname,
+            CASE
+                WHEN ( SUM(added_inc_com) - SUM(deleted_inc_com) ) >= 1 THEN '*Incident Completed*'
+                ELSE NULL
+            END AS incident_complete
+        FROM
+            (
+                SELECT
+                    eventname,
+                    CASE
+                        WHEN new_value LIKE '%Incident completed%%' THEN 1
+                        ELSE 0
+                    END AS added_inc_com,
+                    CASE
+                        WHEN new_value LIKE '%Incident Uncompleted%' THEN 1
+                        ELSE 0
+                    END AS deleted_inc_com
+                FROM
+                    obvwh.oms_gap_audit_log@fprp
+                WHERE
+                    new_value LIKE '%Incident completed%%'
+                    OR new_value LIKE '%Incident Uncompleted%'
+				--	(new_value LIKE '%Incident Complete:checked%'
+				--	or new_value LIKE '%Incident Complete:unchecked%')
+            )
+        GROUP BY eventname )inc
+        on ef.eventname = inc.eventname
+-----------------------------------------------------------------------------------------------------
+        where
+        1=1 
+        AND ef.startdatetime > '07/01/2019'
+        and ef.SERVICECENTER not in ('BV', 'EV', 'FB', 'MV', 'RP')
+        and effsd.Fuse_SD is not null
+        AND inc.incident_complete IS NULL
+        ORDER  BY Max_Cust_Aff_Date;

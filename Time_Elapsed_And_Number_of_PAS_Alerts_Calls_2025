@@ -1,0 +1,58 @@
+SELECT          cf.eventkey,
+                cf.CALLERTYPE,
+                cf.RECDATETIME,
+                ef.SERVICECENTER
+                FROM OBVWH.OMS_CALL_FACT@FPRP cf
+                INNER JOIN OBVWH.OMS_EVENT_FACT@FPRP ef ON ef.eventkey = cf.eventkey
+                Where cf.callertype = 'PAS'
+                AND ef.STARTDATETIME BETWEEN TO_DATE('01/01/2025 00:00:00', 'MM/DD/YYYY HH24:MI:SS') 
+                AND TO_DATE('04/15/2025 23:59:59', 'MM/DD/YYYY HH24:MI:SS');
+
+SELECT * FROM  OBVWH.OMS_CALL_FACT@FPRP;                
+SELECT *  FROM OBVWH.OMS_EVENT_FACT@FPRP;                 
+SELECT *  FROM obvwh.oms_service_suite@fprp; 
+SELECT * FROM obvcustom.omsx_truck_int@fprp;
+                
+                
+SELECT
+  ef.EVENTNAME,
+  ef.SERVICECENTER AS SERVICECENTER,
+  cf.CALLERTYPE as CALLER_TYPE,
+  cf.RECDATETIME,
+  tnf.STARTDATETIME AS TNFSTARTDATETIME,
+  tnf.ACTIONTYPE AS CREW_ACTIONTYPE,
+  ef.STARTDATETIME AS STARTDATETIME,
+  ef.RESTOREDDATETIME AS RESTORATION_TIME,
+  ef.DURATIONHM,
+  ef.NUMCALLS,
+  ef.NUMCUSTRESTORED AS NUMCUSTRESTORED,
+  ss.OUTAGE_CAUSE_CODE AS CAUSECODE,
+  ss.OUTAGE_CAUSE_DESC AS CAUSE_DESC,
+  (ss.action_taken_1 || ' , ' || ss.action_taken_2 || ' , ' || ss.action_taken_3 || ' , '
+          || ss.action_taken_4 || ' , ' || ss.action_taken_5 || ' , ' || ss.action_taken_6 ) AS ACTION_TAKEN,
+  cf.CALLERCOMMENTS AS CALLERCOMMENTS,
+  ss.CREW_ID AS CREW_NAME,
+  ss.TRUCK_NUMBER AS TRUCKNUMBER,
+  ss.CREW_NOTES AS CREW_REMARKS,
+  ef.MOMENTARYOUTAGEFLAG AS MOMENTARYOUTAGEFLAG,
+  ef.DEVICENAME AS DEVICENAME
+FROM OBVWH.OMS_EVENT_FACT@FPRP ef
+INNER JOIN obvwh.oms_service_suite@fprp ss ON ss.eventkey = ef.eventkey 
+INNER JOIN OBVWH.OMS_CALL_FACT@FPRP cf ON cf.eventkey = ef.eventkey
+INNER JOIN obvcustom.omsx_truck_int@fprp tnf ON tnf.eventid = ef.eventid
+WHERE ef.STARTDATETIME BETWEEN TO_DATE('01/01/2025 00:00:00', 'MM/DD/YYYY HH24:MI:SS') 
+  AND TO_DATE('04/15/2025 23:59:59', 'MM/DD/YYYY HH24:MI:SS')
+  AND cf.CALLERTYPE = 'PAS'
+  --AND ef.SERVICECENTER = 'GAL'
+  AND tnf.ACTIONTYPE = 'ONSITE'
+  AND ef.EXCLUDETROUBLEFLAG = 0
+  AND ef.MOMENTARYOUTAGEFLAG = 0
+  AND ef.CANCELLEDFLAG = 0
+  AND ef.PLANNEDOTGFLAG = 0
+  AND ef.NONOUTGCALLFLAG = 0
+  AND ef.ORPHANOUTAGEFLAG = 0
+  AND ef.SERVICECENTER NOT IN ('BV', 'EV', 'FB', 'MV', 'RP', 'INDIANA')
+ORDER BY EF.EVENTNAME, STARTDATETIME;    
+
+
+

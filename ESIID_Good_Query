@@ -1,0 +1,41 @@
+SELECT *
+FROM OBVWH.OMS_EVENT_FACT@FPRP ef
+LEFT JOIN (
+    SELECT 
+        eventname,
+        CREW_NAME,
+        outage_cause_desc,
+        referred_reason_notes,
+        action_taken_1,
+        ( action_taken_1 || ' , ' || action_taken_2 || ' , ' || action_taken_3 || ' , '
+          || action_taken_4 || ' , ' || action_taken_5 || ' , ' || action_taken_6 ) AS action_taken
+    FROM obvwh.oms_service_suite@fprp
+) ss ON ef.eventname = ss.eventname
+LEFT JOIN obvwh.oms_cause_dim@fprp cd ON ef.causekey = cd.causekey
+LEFT JOIN (
+    SELECT
+        eventname,
+        LISTAGG(action_taken_name,' , ') WITHIN GROUP(ORDER BY action_taken_name) AS action_taken
+    FROM obvwh.oms_all_actions_taken_oms@fprp
+    GROUP BY eventname
+) omsat ON ef.eventname = omsat.eventname
+LEFT JOIN OBVWH.OMS_CUSTAFFECTED_INT@FPRP CA on ef.GROUPEVENTKEY = ca.GROUPEVENTKEY
+LEFT JOIN OBVWH.OMS_CUSTSUPPLYLINK_FACT@FPRP CS on CA.CUSTKEY = CS.CUSTKEY
+LEFT JOIN (
+    SELECT DISTINCT
+        eventname,
+        phase,
+        HAZARD,
+        hazard_level_code,
+        PARTIAL_CIRCUIT,
+        CASE
+            WHEN phase IN ('C', '  C', 'B', ' B ', 'A', 'A  ') THEN 'Single Phase'
+            WHEN phase IS NULL THEN NULL
+            ELSE 'Multi Phase'
+        END AS phase_count
+    FROM OBVWH.OMS_GAP_NEW_COLS@FPRP
+) gnc ON ef.eventname = gnc.eventname
+WHERE 
+    CUSTSUPPLYLINKID = '1008901023816'
+    AND WHERE ef.STARTDATETIME BETWEEN TO_DATE('2024-07-07', 'YYYY-MM-DD') AND TO_DATE('2024-07-14', 'YYYY-MM-DD') + 1
+    ORDER BY ef.STARTDATETIME DESC, ef.RESTOREDDATETIME DESC

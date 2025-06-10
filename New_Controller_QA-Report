@@ -1,0 +1,426 @@
+SELECT DISTINCT
+    ef.eventname AS "Event",
+    ef.startdatetime AS "Start_Date_Time",
+    ef.trouble_lvl AS "Lvl",
+    rest_aud.operator_id AS "Restored_By",
+    ef.servicecenter AS "SVC_Center",
+    ef.substationname AS "Substation",
+    ef.feedername AS "Circuit",
+    SUBSTR(
+        NVL(def.Delete_Check,'') || chr(13)||chr(10) || chr(13)||chr(10) ||
+        NVL(ief.Invalid_Event_Check,'') || chr(13)||chr(10) ||
+        NVL(crcef.controller_check,'') || chr(13)||chr(10) || chr(13)||chr(10) ||
+        NVL(crcef.controller_check_2,'') || chr(13)||chr(10) || chr(13)||chr(10) ||
+        NVL(nccef.No_Cause_Check,'') || chr(13)||chr(10) || chr(13)||chr(10) ||
+        NVL(nactef.Action_Taken_Check,'') || chr(13)||chr(10) || chr(13)||chr(10),
+    1, 4000) AS "QA_Checks",
+    SUBSTR(
+        '[ Master Outage ]: ' || NVL(prim_aud.Master_Outage,'') || chr(13)||chr(10) ||
+        '[ Start Date Time ]: ' || NVL(mcef.startdatetime,'') || chr(13)||chr(10) ||
+        '[ Restore Date Time ]: ' || NVL(mcef.restoreddatetime,'') || chr(13)||chr(10) ||
+        '[ Duration ]: ' || NVL(mcef.DURATIONHM,'') || chr(13)||chr(10) ||
+        '[ Comments ]: ' || NVL(mcef.operatorcomments,'') || chr(13)||chr(10) ||
+        '[ Cause_Code ]: ' || NVL(mcef.causename,'') || chr(13)||chr(10) ||
+        '[ Action_Taken ]: ' || NVL(mat_data.moat_oms_action_taken_codes,'') || chr(13)||chr(10) ||
+        '[ Event Indicators ] :  ' || NVL(mi_data.Master_Outage_Indicators,''),
+    1, 4000) AS "Master_Outage_Details",
+    SUBSTR(
+        '[ Event ]: ' || NVL(ef.eventname,'') || chr(13)||chr(10) ||
+        '[ Trouble Lvl ]: ' || NVL(ef.trouble_lvl,'') || chr(13)||chr(10) ||
+        '[ Device Name ]: ' || NVL(ef.devicename,'') || chr(13)||chr(10) ||
+        '[ Phase]: ' || NVL(gnc.phase,'') || chr(13)||chr(10) ||
+        '[ Service Code ]: ' || NVL(ef.build_type,'') || chr(13)||chr(10) ||
+        '[ Start Date Time ]: ' || NVL(ef.startdatetime,'') || chr(13)||chr(10) ||
+        '[ Restore Date Time ]: ' || NVL(ef.restoreddatetime,'') || chr(13)||chr(10) ||
+        '[ Duration ]: ' || NVL(ef.DURATIONHM,'') || chr(13)||chr(10) ||
+        '[ Customers Affected ]: ' || NVL(ef.numcustdeenergized,'') || chr(13)||chr(10) ||
+        '[ Number Of Calls ]: ' || NVL(ef.numcalls,'') || chr(13)||chr(10) ||
+        '[ Referral Notes ]: ' || NVL(ss.referred_reason_notes,'') || chr(13)||chr(10) ||
+        '[ Comments ]: ' || NVL(ef.operatorcomments,'') || chr(13)||chr(10) ||
+        '[ Cause Code ]: ' || NVL(cd.causecode,'') || chr(13)||chr(10) ||
+        '[ Action Taken ]: ' || NVL(omsat.action_taken,'') || chr(13)||chr(10) ||
+        '[ SS Cause Code ]: ' || NVL(ss.outage_cause_desc,'') || chr(13)||chr(10) ||
+        '[ SS Action Taken ]: ' || NVL(ss.action_taken,'') || chr(13)||chr(10) ||
+        '[ Event Indicator ]: ' || '[ Audit Log Highlights ]: ' ||
+        NVL(create_aud.operator_id,'') || ' ' || NVL(create_aud.event_create,'') || ' . ' ||
+        NVL(block_aud.block_to_mbile,'') || ' . ' ||
+        NVL(plan_aud.planned_indicator,'') || NVL(rest_aud.operator_id,'') || ' ' ||
+        NVL(rest_aud.event_restore,'') || ' . ' ||
+        NVL(act_aud.act_delete,'') || ' . ' ||
+        NVL(caus_aud.cause_delete,'') || ' . ' || ' ',
+    1, 4000) AS "Details",
+    SUBSTR(
+        NVL(fir.First_Call,'') || chr(13)||chr(10) ||
+        NVL(sec.Second_Call,'') || chr(13)||chr(10) ||
+        NVL(thr.Third_Call,'') || chr(13)||chr(10) ||
+        NVL(fou.Fourth_Call,'') || chr(13)||chr(10) ||
+        NVL(fif.Fifth_Call,''),
+    1, 4000) AS "First_5_Calls",
+    cd.causecode AS "OMS_Cause_Code",
+    omsat.action_taken AS "OMS_Action_Taken"
+FROM obvwh.oms_event_fact@fprp ef
+-- Restored details
+LEFT JOIN (
+    SELECT eventname, operator_id, SUBSTR(new_value,INSTR(new_value,'R'),8) event_restore
+    FROM obvwh.oms_gap_audit_log@fprp
+    WHERE new_value LIKE '%Status:Restored;%'
+) rest_aud ON ef.eventname = rest_aud.eventname
+-- Controller check 1 and 2
+LEFT JOIN (
+    SELECT
+        crcef.eventname,
+        cnrs.operator_id,
+        crcef.causekey,
+        crcss.outage_cause_desc,
+        crcat.oms_action_taken,
+        crcss.ss_action_taken,
+        CASE
+            WHEN cnrs.operator_id NOT LIKE '0%'
+                AND cnrs.operator_id NOT IN ('SUBSTATION', 'AMS', 'SCADA', 'SUBSTATIONC', 'ABB ENGINE')
+                AND crcef.causekey = '-1'
+                AND crcss.outage_cause_desc IS NULL
+            OR (cnrs.operator_id NOT LIKE '0%'
+                AND cnrs.operator_id NOT IN ('SUBSTATION', 'AMS', 'SCADA', 'SUBSTATIONC', 'ABB ENGINE')
+                AND crcat.oms_action_taken IS NULL
+                AND crcss.action_taken_1 IS NULL
+                AND crcef.causekey NOT IN ('43', '85', '48', '55', '17', '35', '71', '78','27', '15', '96', '36'))
+            THEN 'Controller Restored Event'
+            ELSE NULL
+        END AS controller_check,
+        CASE
+            WHEN cnrs.operator_id IN ('SUBSTATION', 'SCADA', 'SUBSTATIONC')
+                AND crcef.causekey = '-1'
+                AND crcss.outage_cause_desc IS NULL
+            OR (cnrs.operator_id IN ('SUBSTATION', 'SCADA', 'SUBSTATIONC')
+                AND crcat.oms_action_taken IS NULL
+                AND crcss.action_taken_1 IS NULL
+                AND crcef.causekey NOT IN ('43', '85', '48', '55', '17', '35', '71', '78','27', '15', '96', '36'))
+            THEN 'SCADA/Substation Device Used to Resolve Event. Please Have A Head Controller Add Missing Items'
+            ELSE NULL
+        END AS controller_check_2
+    FROM obvwh.oms_event_fact@fprp crcef
+    LEFT JOIN (
+        SELECT eventname, LISTAGG(action_taken_name,' . ') WITHIN GROUP (ORDER BY action_taken_name) AS oms_action_taken
+        FROM obvwh.oms_all_actions_taken_oms@fprp
+        GROUP BY eventname
+    ) crcat ON crcef.eventname = crcat.eventname
+    LEFT JOIN (
+        SELECT eventname, outage_cause_desc, referred_reason_notes, action_taken_1,
+               (action_taken_1 || ' . ' || action_taken_2 || ' . ' || action_taken_3 || ' . ' ||
+                action_taken_4 || ' . ' || action_taken_5 || ' . ' || action_taken_6) AS ss_action_taken
+        FROM obvwh.oms_service_suite@fprp
+    ) crcss ON crcef.eventname = crcss.eventname
+    LEFT JOIN (
+        SELECT eventname, operator_id, outage_date, SUBSTR(new_value,INSTR(new_value,'R'),8) event_restore, new_value
+        FROM obvwh.oms_gap_audit_log@fprp
+        WHERE new_value LIKE '%Status:Restored;%'
+    ) cnrs ON crcef.eventname = cnrs.eventname
+) crcef ON ef.eventname = crcef.eventname
+-- No Cause Check
+LEFT JOIN (
+    SELECT nccef.eventname, nccef.causekey, nccss.outage_cause_desc,
+        CASE
+            WHEN nccef.causekey = '-1' AND nccss.outage_cause_desc IS NULL THEN 'No Cause Code'
+            ELSE NULL
+        END AS No_Cause_Check
+    FROM obvwh.oms_event_fact@fprp nccef
+    LEFT JOIN (
+        SELECT eventname, outage_cause_desc
+        FROM obvwh.oms_service_suite@fprp
+    ) nccss ON nccef.eventname = nccss.eventname
+) nccef ON ef.eventname = nccef.eventname
+-- No Action Taken Check
+LEFT JOIN (
+    SELECT nactef.eventname, nactef.causekey, natat.oms_action_taken, natss.ss_action_taken,
+        CASE
+            WHEN natat.oms_action_taken IS NULL AND natss.ss_action_taken IS NULL
+                 AND nactef.causekey NOT IN ('43','85','48','55','17','35','71','78','27','15','96','36')
+            THEN 'No Action Taken'
+            ELSE NULL
+        END as Action_Taken_Check
+    FROM obvwh.oms_event_fact@fprp nactef
+    LEFT JOIN (
+        SELECT eventname, LISTAGG(action_taken_name, ', ') WITHIN GROUP (ORDER BY action_taken_name) AS oms_action_taken
+        FROM obvwh.oms_all_actions_taken_oms@fprp
+        GROUP BY eventname
+    ) natat ON nactef.eventname = natat.eventname
+    LEFT JOIN (
+        SELECT eventname, outage_cause_desc, referred_reason_notes, action_taken_1,
+               (action_taken_1 || ' , ' || action_taken_2 || ' , ' || action_taken_3 || ' , ' ||
+                action_taken_4 || ' , ' || action_taken_5 || ' , ' || action_taken_6) AS ss_action_taken
+        FROM obvwh.oms_service_suite@fprp
+    ) natss ON nactef.eventname = natss.eventname
+) nactef ON ef.eventname = nactef.eventname
+-- Delete Check
+LEFT JOIN (
+    SELECT def.eventname, def.numcalls,
+        CASE
+            WHEN def.numcalls = '0' AND (
+                LOWER(def.operatorcomments) LIKE '%dup case%'
+                OR LOWER(def.operatorcomments) LIKE '%dup event%'
+                OR LOWER(def.operatorcomments) LIKE '%dup order%'
+                OR LOWER(def.operatorcomments) LIKE '%void order%'
+                OR LOWER(def.operatorcomments) LIKE '%bad case%'
+                OR LOWER(def.operatorcomments) LIKE '%false case%'
+                OR LOWER(def.operatorcomments) LIKE '%false outage%'
+                OR LOWER(def.operatorcomments) LIKE '%false event%'
+                OR LOWER(def.operatorcomments) LIKE '%disregard%'
+                OR LOWER(def.operatorcomments) LIKE '%invalid%'
+                OR LOWER(def.operatorcomments) LIKE '%not valid%'
+                OR LOWER(def.operatorcomments) LIKE '%dis regard%'
+                OR LOWER(def.operatorcomments) LIKE '%delete%'
+                OR LOWER(def.operatorcomments) LIKE '%bogu%'
+                OR LOWER(def.operatorcomments) LIKE '%bo gus%'
+                OR LOWER(def.operatorcomments) LIKE '%bogs%'
+                OR LOWER(def.operatorcomments) LIKE '%not real%'
+                OR LOWER(def.operatorcomments) LIKE '%not reel%'
+                OR LOWER(def.operatorcomments) LIKE '%in error%'
+                OR LOWER(def.operatorcomments) LIKE '%in eror%'
+                OR LOWER(def.operatorcomments) LIKE '%by mistake%'
+                OR LOWER(def.operatorcomments) LIKE '%open% by accid%'
+                OR LOWER(def.operatorcomments) LIKE '%creat% by accid%'
+                OR LOWER(def.operatorcomments) LIKE '%by acid%'
+                OR LOWER(def.operatorcomments) LIKE '%dupicate%'
+            )
+            THEN 'Delete - Consider Deleting Event Based On Comments And No Calls'
+            ELSE NULL
+        END as Delete_Check
+    FROM obvwh.oms_event_fact@fprp def
+) def ON ef.eventname = def.eventname
+-- Invalid Event Check
+LEFT JOIN (
+    SELECT ief.eventname, ief.numcalls,
+        CASE
+            WHEN ief.numcalls >= '1' AND (
+                LOWER(ief.operatorcomments) LIKE '%dup case%'
+                OR LOWER(ief.operatorcomments) LIKE '%dup event%'
+                OR LOWER(ief.operatorcomments) LIKE '%dup order%'
+                OR LOWER(ief.operatorcomments) LIKE '%void order%'
+                OR LOWER(ief.operatorcomments) LIKE '%bad case%'
+                OR LOWER(ief.operatorcomments) LIKE '%false case%'
+                OR LOWER(ief.operatorcomments) LIKE '%false outage%'
+                OR LOWER(ief.operatorcomments) LIKE '%false event%'
+                OR LOWER(ief.operatorcomments) LIKE '%disregard%'
+                OR LOWER(ief.operatorcomments) LIKE '%invalid%'
+                OR LOWER(ief.operatorcomments) LIKE '%not valid%'
+                OR LOWER(ief.operatorcomments) LIKE '%dis regard%'
+                OR LOWER(ief.operatorcomments) LIKE '%delete%'
+                OR LOWER(ief.operatorcomments) LIKE '%bogu%'
+                OR LOWER(ief.operatorcomments) LIKE '%bo gus%'
+                OR LOWER(ief.operatorcomments) LIKE '%bogs%'
+                OR LOWER(ief.operatorcomments) LIKE '%not real%'
+                OR LOWER(ief.operatorcomments) LIKE '%not reel%'
+                OR LOWER(ief.operatorcomments) LIKE '%in error%'
+                OR LOWER(ief.operatorcomments) LIKE '%in eror%'
+                OR LOWER(ief.operatorcomments) LIKE '%by mistake%'
+                OR LOWER(ief.operatorcomments) LIKE '%open% by accid%'
+                OR LOWER(ief.operatorcomments) LIKE '%creat% by accid%'
+                OR LOWER(ief.operatorcomments) LIKE '%by acid%'
+                OR LOWER(ief.operatorcomments) LIKE '%dupicate%'
+            )
+            THEN 'Invalid Event - Consider Checking the "Invalid Event" Indicator Based On Comments And Number Of Calls'
+            ELSE NULL
+        END as Invalid_Event_Check
+    FROM obvwh.oms_event_fact@fprp ief
+) ief ON ef.eventname = ief.eventname
+-- Incident complete
+LEFT JOIN (
+    SELECT eventname,
+        CASE WHEN (SUM(added_inc_com) - SUM(deleted_inc_com)) >= 1 THEN '*Incident Completed*'
+             ELSE NULL END AS incident_complete
+    FROM (
+        SELECT eventname,
+            CASE WHEN new_value LIKE '%Incident completed%%' THEN 1 ELSE 0 END AS added_inc_com,
+            CASE WHEN new_value LIKE '%Incident Uncompleted%' THEN 1 ELSE 0 END AS deleted_inc_com
+        FROM obvwh.oms_gap_audit_log@fprp
+        WHERE new_value LIKE '%Incident completed%%' OR new_value LIKE '%Incident Uncompleted%'
+    )
+    GROUP BY eventname
+) inc ON ef.eventname = inc.eventname
+-- Master outage
+LEFT JOIN (
+    SELECT eventname, operator_id, SUBSTR(new_value,-9,7) Master_Outage
+    FROM obvwh.oms_gap_audit_log@fprp
+    WHERE new_value LIKE '%Primary outage number%'
+) prim_aud ON ef.eventname = prim_aud.eventname
+-- Master outage cause, comments and other details
+LEFT JOIN (
+    SELECT mcef.eventname, mcef.startdatetime, mcef.restoreddatetime, mcef.DURATIONHM, moc.regular_event, moc.Master_Outage, mcef.operatorcomments, mcd.causename
+    FROM obvwh.oms_event_fact@fprp mcef
+    LEFT JOIN obvwh.oms_cause_dim@fprp mcd ON mcef.causekey = mcd.causekey
+    LEFT JOIN (
+        SELECT eventname regular_event, SUBSTR(new_value,-9,7) Master_Outage
+        FROM obvwh.oms_gap_audit_log@fprp
+        WHERE new_value LIKE '%Primary outage number%'
+    ) moc ON mcef.eventname = moc.Master_Outage
+) mcef ON ef.eventname = mcef.regular_event
+-- Master outage action taken
+LEFT JOIN (
+    SELECT mo.regular_event, mo.Master_Outage, mat.eventname at_eventname,
+        LISTAGG(mat.action_taken_name, ', ') WITHIN GROUP (ORDER BY mat.action_taken_name) AS moat_oms_action_taken_codes
+    FROM obvwh.oms_all_actions_taken_oms@fprp mat
+    LEFT JOIN (
+        SELECT eventname regular_event, SUBSTR(new_value,-9,7) Master_Outage
+        FROM obvwh.oms_gap_audit_log@fprp
+        WHERE new_value LIKE '%Primary outage number%'
+    ) mo ON mat.eventname = mo.Master_Outage
+    GROUP BY mat.eventname, mo.regular_event, mo.Master_Outage
+) mat_data ON ef.eventname = mat_data.regular_event
+-- Master outage indicators
+LEFT JOIN (
+    SELECT mial.regular_event, mial.Master_Outage, mi.eventname at_eventname,
+        LISTAGG(mi.field_name, ', ') WITHIN GROUP (ORDER BY mi.field_name) AS Master_Outage_Indicators
+    FROM obvwh.omsx_eventind_det@fprp mi
+    LEFT JOIN (
+        SELECT eventname regular_event, SUBSTR(new_value,-9,7) Master_Outage
+        FROM obvwh.oms_gap_audit_log@fprp
+        WHERE new_value LIKE '%Primary outage number%'
+    ) mial ON mi.eventname = mial.Master_Outage
+    WHERE mi.value_no = '1'
+    GROUP BY mi.eventname, mial.regular_event, mial.Master_Outage
+) mi_data ON ef.eventname = mi_data.regular_event
+-- Phase and hazard info
+LEFT JOIN (
+    SELECT eventname, phase, hazard_level_code,
+        CASE
+            WHEN phase IN ('C','  C','B',' B ','A','A  ') THEN 'Single Phase'
+            WHEN phase IS NULL THEN NULL
+            ELSE 'Multi Phase'
+        END AS phase_count
+    FROM obvwh.oms_gap_new_cols@fprp
+) gnc ON ef.eventname = gnc.eventname
+-- Service suite table info
+LEFT JOIN (
+    SELECT eventname, outage_cause_desc, referred_reason_notes, action_taken_1,
+           (action_taken_1 || ' , ' || action_taken_2 || ' , ' || action_taken_3 || ' , ' ||
+            action_taken_4 || ' , ' || action_taken_5 || ' , ' || action_taken_6) AS action_taken
+    FROM obvwh.oms_service_suite@fprp
+) ss ON ef.eventname = ss.eventname
+-- Cause code table join
+LEFT JOIN obvwh.oms_cause_dim@fprp cd ON ef.causekey = cd.causekey
+-- OMS action taken table join
+LEFT JOIN (
+    SELECT eventname, LISTAGG(action_taken_name, ' , ') WITHIN GROUP (ORDER BY action_taken_name) AS action_taken
+    FROM obvwh.oms_all_actions_taken_oms@fprp
+    GROUP BY eventname
+) omsat ON ef.eventname = omsat.eventname
+-- Created outage message and Created By - Operator ID
+LEFT JOIN (
+    SELECT eventname, operator_id, SUBSTR(new_value,INSTR(new_value,'Cr'),15) event_create
+    FROM obvwh.oms_gap_audit_log@fprp
+    WHERE new_value LIKE '%OUTAGE_STATUS_CHANGE; Status:CREATED%'
+) create_aud ON ef.eventname = create_aud.eventname
+-- Block to mobile message
+LEFT JOIN (
+    SELECT DISTINCT eventname, SUBSTR(new_value,INSTR(new_value,'B'),28) AS block_to_mbile
+    FROM obvwh.oms_gap_audit_log@fprp
+    WHERE new_value LIKE '%BLOCK_MOBILE_OUTBOUND changed from <null> to 1%'
+) block_aud ON ef.eventname = block_aud.eventname
+-- Outage planned indicator message
+LEFT JOIN (
+    SELECT DISTINCT eventname,
+        LISTAGG(SUBSTR(new_value,INSTR(new_value,'OUTAGE_'),25),' ') WITHIN GROUP(ORDER BY SUBSTR(new_value,INSTR(new_value,'OUTAGE_'),25)) as planned_indicator
+    FROM obvwh.oms_gap_audit_log@fprp
+    WHERE new_value LIKE '%OUTAGE_PLANNED_IND_CHANGE%Comments:1%'
+    GROUP BY eventname
+) plan_aud ON ef.eventname = plan_aud.eventname
+-- Action taken delete
+LEFT JOIN (
+    SELECT DISTINCT eventname,
+        LISTAGG(SUBSTR(new_value,INSTR(new_value,':A')+1,100),' ') WITHIN GROUP(ORDER BY SUBSTR(new_value,INSTR(new_value,':A')+1,100)) as act_delete
+    FROM obvwh.oms_gap_audit_log@fprp
+    WHERE new_value LIKE '%OUTAGE_ACTION_TAKEN; Status:DELETE%'
+    GROUP BY eventname
+) act_aud ON ef.eventname = act_aud.eventname
+-- Cause delete
+LEFT JOIN (
+    SELECT eventname,
+        LISTAGG(SUBSTR(new_value,INSTR(new_value,'Cause D'),300), ' ') WITHIN GROUP(ORDER BY SUBSTR(new_value,INSTR(new_value,'Cause D'),300)) as cause_delete
+    FROM obvwh.oms_gap_audit_log@fprp
+    WHERE new_value LIKE '%OUTAGE_CAUSE; Status:DELETE%'
+    GROUP BY eventname
+) caus_aud ON ef.eventname = caus_aud.eventname
+-- First call
+LEFT JOIN (
+    SELECT DISTINCT cf.eventkey,
+        ( ' Call ID: ' || NVL(co.CALLID,'') || ' | ' || NVL(co.RECDATETIME,'') || ' | ' || NVL(co.CALLERTYPE,'') || chr(13) || chr(10) ||
+          ' ' || NVL(co.CALLDESC,'') || chr(13) || chr(10)
+        ) AS First_Call,
+        co.CallOrder
+    FROM OBVWH.OMS_CALL_FACT@FPRP cf
+    LEFT JOIN (
+        SELECT DISTINCT eventkey, CALLID, RECDATETIME, CALLDESC, CALLERTYPE,
+            DENSE_RANK() OVER (PARTITION BY EVENTKEY ORDER BY CALLID) as CallOrder
+        FROM OBVWH.OMS_CALL_FACT@FPRP
+    ) co ON cf.eventkey = co.eventkey
+    WHERE co.CallOrder = 1
+) fir ON ef.eventkey = fir.eventkey
+-- Second call
+LEFT JOIN (
+    SELECT DISTINCT cf.eventkey,
+        ( ' Call ID: ' || NVL(co.CALLID,'') || ' | ' || NVL(co.RECDATETIME,'') || ' | ' || NVL(co.CALLERTYPE,'') || chr(13) || chr(10) ||
+          ' ' || NVL(co.CALLDESC,'') || chr(13) || chr(10)
+        ) AS Second_Call,
+        co.CallOrder
+    FROM OBVWH.OMS_CALL_FACT@FPRP cf
+    LEFT JOIN (
+        SELECT DISTINCT eventkey, CALLID, RECDATETIME, CALLDESC, CALLERTYPE,
+            DENSE_RANK() OVER (PARTITION BY EVENTKEY ORDER BY CALLID) as CallOrder
+        FROM OBVWH.OMS_CALL_FACT@FPRP
+    ) co ON cf.eventkey = co.eventkey
+    WHERE co.CallOrder = 2
+) sec ON ef.eventkey = sec.eventkey
+-- Third call
+LEFT JOIN (
+    SELECT DISTINCT cf.eventkey,
+        ( ' Call ID: ' || NVL(co.CALLID,'') || ' | ' || NVL(co.RECDATETIME,'') || ' | ' || NVL(co.CALLERTYPE,'') || chr(13) || chr(10) ||
+          ' ' || NVL(co.CALLDESC,'') || chr(13) || chr(10)
+        ) AS Third_Call,
+        co.CallOrder
+    FROM OBVWH.OMS_CALL_FACT@FPRP cf
+    LEFT JOIN (
+        SELECT DISTINCT eventkey, CALLID, RECDATETIME, CALLDESC, CALLERTYPE,
+            DENSE_RANK() OVER (PARTITION BY EVENTKEY ORDER BY CALLID) as CallOrder
+        FROM OBVWH.OMS_CALL_FACT@FPRP
+    ) co ON cf.eventkey = co.eventkey
+    WHERE co.CallOrder = 3
+) thr ON ef.eventkey = thr.eventkey
+-- Fourth call
+LEFT JOIN (
+    SELECT DISTINCT cf.eventkey,
+        ( ' Call ID: ' || NVL(co.CALLID,'') || ' | ' || NVL(co.RECDATETIME,'') || ' | ' || NVL(co.CALLERTYPE,'') || chr(13) || chr(10) ||
+          ' ' || NVL(co.CALLDESC,'') || chr(13) || chr(10)
+        ) AS Fourth_Call,
+        co.CallOrder
+    FROM OBVWH.OMS_CALL_FACT@FPRP cf
+    LEFT JOIN (
+        SELECT DISTINCT eventkey, CALLID, RECDATETIME, CALLDESC, CALLERTYPE,
+            DENSE_RANK() OVER (PARTITION BY EVENTKEY ORDER BY CALLID) as CallOrder
+        FROM OBVWH.OMS_CALL_FACT@FPRP
+    ) co ON cf.eventkey = co.eventkey
+    WHERE co.CallOrder = 4
+) fou ON ef.eventkey = fou.eventkey
+-- Fifth call
+LEFT JOIN (
+    SELECT DISTINCT cf.eventkey,
+        ( ' Call ID: ' || NVL(co.CALLID,'') || ' | ' || NVL(co.RECDATETIME,'') || ' | ' || NVL(co.CALLERTYPE,'') || chr(13) || chr(10) ||
+          ' ' || NVL(co.CALLDESC,'')
+        ) AS Fifth_Call,
+        co.CallOrder
+    FROM OBVWH.OMS_CALL_FACT@FPRP cf
+    LEFT JOIN (
+        SELECT DISTINCT eventkey, CALLID, RECDATETIME, CALLDESC, CALLERTYPE,
+            DENSE_RANK() OVER (PARTITION BY EVENTKEY ORDER BY CALLID) as CallOrder
+        FROM OBVWH.OMS_CALL_FACT@FPRP
+    ) co ON cf.eventkey = co.eventkey
+    WHERE co.CallOrder = 5
+) fif ON ef.eventkey = fif.eventkey
+WHERE
+    ef.startdatetime >= TO_DATE('01/01/2025 00:00','MM/DD/YYYY HH24:MI')
+    AND TRUNC(ef.RESTOREDDATETIME) <= TRUNC(SYSDATE - 1)
+    AND ef.SERVICECENTER NOT IN ('BV','EV','FB','MV','RP')
+    AND ef.CANCELLEDFLAG = '0'
+    AND ef.NONCUSTCALLFLAG = '0'
+    AND (crcef.controller_check IS NOT NULL OR crcef.controller_check_2 IS NOT NULL)
+    AND inc.incident_complete IS NULL
+ORDER BY ef.startdatetime;

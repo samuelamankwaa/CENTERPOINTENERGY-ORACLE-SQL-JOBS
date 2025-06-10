@@ -1,0 +1,4 @@
+SELECT * FROM obvwh.oms_gap_audit_log@fprp
+WHERE OPERATOR_ID = '00226766'
+AND OUTAGE_DATE >= TO_DATE('01/01/2025 00:00','MM/DD/YYYY HH24:MI');
+---AND NEW_VALUE lIKE 'incident completed' ;O

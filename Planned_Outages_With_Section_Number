@@ -1,0 +1,63 @@
+WITH omsat AS (
+    SELECT
+        eventname,
+        LISTAGG(action_taken_name, ' , ') WITHIN GROUP (ORDER BY eventname) AS action_taken
+    FROM
+        obvwh.oms_all_actions_taken_oms@fprp
+    GROUP BY
+        eventname
+),
+ranked_events AS (
+    SELECT
+        ef.EVENTNAME,
+        ef.STARTDATETIME,
+        ef.RESTOREDDATETIME,
+        ef.COMPLETEDDATETIME AS COMPLETION_DATE,
+        ef.EVENTLOCATION AS LOCATION,
+        ef.PLANNEDOTGFLAG,
+        sn.SECTION_CODE,
+        sn.PRIME_SECTION_CODE,
+        ef.SERVICECENTER,
+        ef.FEEDERNAME,
+        cd.CAUSECODE,
+--        cd.CAUSEDESC,
+        ef.NUMCUSTDEENERGIZED AS CUSTOMERS_AFFACTED,
+        ef.DEV_ID AS DEVICE_ID,
+        ss.CREW_NAME,
+        ss.CREW_ID,
+--        A.Tasks_WorkOrderTask_TaskAssignment_UserId AS CREW_NAME,
+        omsat.action_taken AS ACTION_TAKEN,
+        ef.OPERATORCOMMENTS AS COMMENTS,
+        ROW_NUMBER() OVER (
+            PARTITION BY ef.EVENTNAME
+            ORDER BY ef.COMPLETEDDATETIME DESC
+        ) AS row_num
+    FROM
+        obvwh.oms_event_fact@fprp ef
+        LEFT JOIN obvwh.oms_service_suite@fprp ss
+            ON ef.EVENTNAME = ss.EVENTNAME
+        LEFT JOIN obvwh.oms_cause_dim@fprp cd
+            ON ef.causekey = cd.causekey
+        LEFT JOIN omsat
+            ON ef.EVENTNAME = omsat.eventname
+        LEFT JOIN  OBVWH.OMS_SECTION_SUMMARY@FPRP sn
+            ON ss.EVENTNAME =  sn.EVENTNAME
+--        LEFT JOIN obvwh.eai_elec_ops_t_elec_order_tasks@fprp A
+--            ON ef.EVENTNAME = A.OrderNumber
+               -- (Add any necessary date filters for A.OrderUpdateTS if needed, using AND in ON or WHERE)
+    WHERE
+        ef.COMPLETEDDATETIME BETWEEN TO_DATE('2023-09-01 00:00:00', 'YYYY-MM-DD HH24:MI:SS') AND TO_DATE('2025-10-31 23:59:59', 'YYYY-MM-DD HH24:MI:SS')
+        AND (
+            cd.CAUSECODE LIKE '%EM%' OR cd.CAUSECODE LIKE '%IN%' OR cd.CAUSECODE LIKE '%CR%' OR
+            cd.CAUSECODE LIKE '%DC%' OR cd.CAUSECODE LIKE '%LA%' OR cd.CAUSECODE LIKE '%RS%' OR
+            cd.CAUSECODE LIKE '%TM%' OR cd.CAUSECODE LIKE '%UU%' OR cd.CAUSECODE LIKE '%VT%'
+        )
+        AND ef.SERVICECENTER NOT IN ('BV', 'EV', 'FB', 'MV', 'RP', 'INDIANA')
+)
+SELECT *
+FROM ranked_events
+WHERE row_num = 1
+ORDER BY
+    COMPLETION_DATE,
+    RESTOREDDATETIME,
+    STARTDATETIME;

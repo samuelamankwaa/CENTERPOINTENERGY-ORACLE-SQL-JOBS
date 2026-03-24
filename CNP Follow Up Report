@@ -1,0 +1,88 @@
+Vines/follow-up Report for vegetation
+ 
+ 
+To:	Yurick, Timothy J; Bryant, Kedrick R; Hargraves, Katie J	
+ 
+Subject: Follow-up report 08_23_2023 - 08_29_2023	
+ 
+Please see Attached.	
+ 
+SELECT
+     h.eventname,
+     ss.service_center_name,
+     h.ckt,
+     h.section,
+     ss.follow_up_ind,
+     h.trouble_location,
+     h.trouble_lvl,
+     h.causedesc,
+     h.puc_cause,
+     h.devicename,
+     h.service_cd,
+     h.outage_eqp_1,
+     h.cause,
+     ss.crew_id,
+     h.outdatetime,
+     h.durationmin,
+     h.custmins,
+     ss.follow_up_desc,
+     h.affected_customers,
+     h.ckt_custcount,
+     h.remarks,
+     h.ondatetime,
+     h.ontime,
+     h.outage_type_1,
+     h.caidi_impact,
+     h.caidi,
+     h.saidi_impact,
+     h.saifi_impact,
+     h.saidi_ckt,
+     h.saifi_ckt,
+     h.sa_custcount,
+     h.saidi_sa,
+     h.saifi_sa,
+     h.reportable_to_puc,
+     h.puc_category,
+     h.fuse,
+     h.transformer,
+     h.casenumber,
+     h.subcase,
+     h.sustained_custaffected,
+     h.service_off_flag,
+     h.cnp_eqp,
+     h.causeid,
+     h.major_event_flag,
+     h.sustained_or_momentary,
+     h.num_sustained_cases,
+     h.num_lockouts,
+     h.momentary_custaffected,
+     h.num_momentary_cases,
+     h.num_momentary_cktops,
+     h.outage_type_2,
+     h.outage_type_3,
+     h.outage_type_4,
+     h.outage_type_5,
+     h.outage_type_6,
+     h.truck_1,
+     h.truck_2,
+     h.truck_3,
+     h.assetkey,
+     h.single_case_flag,
+     h.crew_ind_flag,
+     h.primary_case,
+     h.restfactkey,
+     h.system_population,
+     h.latitude,
+     h.longitude,
+     h.ytd_sustained_custaffected,
+     h.eventkey,
+     h.maifi_ckt,
+     h.maifi_sa
+FROM
+     rrd.tb_circuitoutagehistory h
+     LEFT JOIN obvwh.oms_service_suite@fprp ss ON ss.eventname = h.eventname
+     LEFT JOIN obvwh.oms_event_fact@fprp gg ON ss.eventname = gg.eventname
+WHERE
+--     h.outdatetime >= '01/01/2023'
+     trunc(h.outdatetime) >= trunc(SYSDATE - 7)
+     and h.primary_case='Y';
